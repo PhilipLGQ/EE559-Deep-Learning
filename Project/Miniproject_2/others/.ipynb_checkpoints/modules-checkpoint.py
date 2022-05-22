@@ -8,10 +8,10 @@ from torch.nn.functional import fold, unfold
 # ===========================================
 # Module Superclass
 class Module(object):
-    def forward(self, inp):
+    def forward(self, *_input):
         raise NotImplementedError
 
-    def backward(self, grad_output):
+    def backward(self, *_grad_outputs):
         raise NotImplementedError
 
     def zero_grad(self):
@@ -22,7 +22,6 @@ class Module(object):
 
     def to(self):
         return
-
 
 # ===========================================
 # Noise2Noise model class (nn.Module)
@@ -40,13 +39,14 @@ class Module(object):
 
 # ===========================================
 # Functional layer modules
-# Conv2d as unfold + matrix multiplication + fold
+# Conv2d as unfold + matrix multiplication + fold (zero padding, squared kernel, and same stride on h,w directions)
 class Conv2d(Module):
-    def __init__(self, in_channels, out_channels, kernel_size=(3, 3), stride=1):
+    def __init__(self, in_channels, out_channels, kernel_size=(3, 3), stride=1, padding=0):
         super(Conv2d, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.stride = stride
+        self.padding = padding
 
         if isinstance(kernel_size, int):
             self.k_size = (kernel_size, kernel_size)
@@ -58,12 +58,13 @@ class Conv2d(Module):
 
         self.w = empty(out_channels, in_channels, self.k_size[0], self.k_size[1], dtype=torch.float32). \
             uniform_(-math.sqrt(k), math.sqrt(k))
-        self.dw = empty(out_channels, in_channels, self.k_size[0], self.k_size[1], dtype=torch.float32).zero_()
+        self.dw = empty(out_channels, dtype=torch.float32).zero_()
+
         self.b = empty(out_channels, dtype=torch.float32).uniform_(-math.sqrt(k), math.sqrt(k))
         self.db = empty(out_channels, dtype=torch.float32).zero_()
 
-    def forward(self, inp):
-        self.input = inp.float()
+    def forward(self, input):
+        self.input = input.float()
         x_unfold = unfold(self.input, kernel_size=self.k_size, stride=self.stride)
         wxb = self.w.view(self.out_channels, -1) @ x_unfold + self.b.view(1, -1, 1)
         output = wxb.view(self.input.size(0), self.out_channels,
@@ -73,55 +74,20 @@ class Conv2d(Module):
     def backward(self, grad_output):
         grad_reshape = grad_output.permute(1, 2, 3, 0).reshape(self.out_channels, -1)
         x_unfold = unfold(self.input, kernel_size=self.k_size, stride=self.stride)
-        x_reshape = x_unfold.permute(2, 0, 1).reshape(-1, x_unfold.size(1))
-
-        # dl_dw = dl_ds * (x) ^ T
-        self.dw.data = grad_reshape.matmul(x_reshape).reshape(self.w.size())
+        x_reshape = x_unfold.permute(2, 0, 1).reshape(grad_reshape.size(2), -1)
 
         # dl_db = dl_ds
-        self.db.data = grad_output.sum(dim=(0, 2, 3))
+        self.db.data = grad_output.sum(axis=(0, 2, 3))
+
+        # dl_dw = dl_ds * (x) ^ T
+        self.dw.data = (grad_reshape @ x_reshape).reshape(self.w.size())
 
         # dl_dx = (w) ^ T * dl_ds
         dx_unfold = (self.w.reshape(self.out_channels, -1).t()) @ grad_reshape
         dx_unfold = dx_unfold.reshape(x_unfold.permute(1, 2, 0).size()).permute(2, 0, 1)
-        dx = fold(dx_unfold, output_size=(self.input.size(2), self.input.size(3)),
-                  kernel_size=self.k_size,
-                  stride=self.stride)
-
-        # print(self.input.size())
-        # print(grad_output.size())
-        print(grad_reshape.size())
-        # print(x_unfold.size())
-        print(x_reshape.size())
-        # print(grad_reshape.matmul(x_reshape).size())
-        # print(dx_unfold.size())
-        # print(dx.size())
+        dx = fold(dx_unfold, (self.input.size(2), self.input.size(3)), kernel_size=self.k_size, stride=self.stride)
 
         return dx
-        # print(grad_output.size())
-        # grad_reshape = grad_output.permute(1, 2, 3, 0).reshape(self.out_channels, -1)
-        # print(grad_reshape.size())
-        #
-        # x_unfold = unfold(self.input, kernel_size=self.k_size, stride=self.stride)
-        # print(x_unfold.size())
-        #
-        # # x_reshape = x_unfold.permute(2, 0, 1).reshape(grad_reshape.size(2), -1)
-        # x_reshape = x_unfold.permute(2, 0, 1).reshape(self.out_channels, -1)
-        #
-        # print(x_reshape.size())
-        # # dl_db = dl_ds
-        # self.db.data = grad_output.sum(axis=(0, 2, 3))
-        # print(self.db.size())
-        #
-        # # dl_dw = dl_ds * (x) ^ T
-        # self.dw.data = (grad_reshape @ x_reshape).reshape(self.w.size())
-        #
-        # # dl_dx = (w) ^ T * dl_ds
-        # dx_unfold = (self.w.reshape(self.out_channels, -1).t()) @ grad_reshape
-        # dx_unfold = dx_unfold.reshape(x_unfold.permute(1, 2, 0).size()).permute(2, 0, 1)
-        # dx = fold(dx_unfold, (self.input.size(2), self.input.size(3)), kernel_size=self.k_size, stride=self.stride)
-        #
-        # return dx
 
     def param(self):
         return [(self.w, self.dw), (self.b, self.db)]
@@ -148,7 +114,7 @@ class ConvTranspose2d(Module):
 
         self.w = empty(out_channels, in_channels, self.k_size[0], self.k_size[1], dtype=torch.float32) \
             .uniform_(-math.sqrt(k), math.sqrt(k))
-        self.dw = empty(out_channels, in_channels, self.k_size[0], self.k_size[1], dtype=torch.float32) \
+        self.dw = empty(out_channels, in_channels, self.k_size[0], self.k_size[1], dtype=torch.float32)\
             .zero_().float()
 
         self.b = empty(out_channels, dtype=torch.float32).uniform_(-math.sqrt(k), math.sqrt(k))
@@ -162,30 +128,14 @@ class ConvTranspose2d(Module):
         x_reshape = self.input.permute(1, 2, 3, 0).reshape(self.in_channels, -1)
         w_reshape = self.w.reshape(self.in_channels, -1)
 
-        # print(H_out, W_out)
-        # print(input.size())
-        # print(x_reshape.size())
-        # print(w_reshape.size())
-        # print(((w_reshape.t()) @ x_reshape).size())
-
-        out_unfold = (w_reshape.t()) @ x_reshape
-        out_unfold = out_unfold.reshape(w_reshape.size(1), -1, input.size(0)).permute(2, 0, 1)
-
-        # print(out_unfold.size())
-
+        out_unfold = ((w_reshape.t()) @ x_reshape).permute(2, 0, 1)
         out = fold(out_unfold, (H_out, W_out), kernel_size=self.k_size, stride=self.stride) + self.b.view(1, -1, 1, 1)
-        # print(out.size())
         return out
 
     def backward(self, grad_outputs):
         grad_unfold = unfold(grad_outputs, kernel_size=self.k_size, stride=self.stride)
-        # print(grad_unfold.size())
-
         x_reshape = self.input.permute(1, 2, 3, 0).reshape(self.in_channels, -1)
-        # print(x_reshape.size())
-
-        grad_reshape = grad_unfold.permute(2, 0, 1).reshape(-1, grad_unfold.size(1))
-        # print(grad_reshape.size())
+        grad_reshape = grad_unfold.permute(2, 0, 1).reshape(self.in_channels, -1)
 
         # dl_dw = dl_ds * (x) ^ T
         self.dw.data = (x_reshape @ grad_reshape).reshape(self.w.size())
@@ -196,7 +146,6 @@ class ConvTranspose2d(Module):
         # dl_dx = (w) ^ T * dl_ds
         dx_raw = self.w.reshape(self.in_channels, -1) @ grad_unfold
         dx = dx_raw.view(dx_raw.size(0), self.in_channels, self.input.size(2), self.input.size(3))
-        # print(dx.size())
         return dx
 
     def param(self):
@@ -205,7 +154,6 @@ class ConvTranspose2d(Module):
     def zero_grad(self):
         self.dw.zero_()
         self.db.zero_()
-
 
 # ===========================================
 
