@@ -1,39 +1,60 @@
+import io
+import pickle
 import torch
-import torch.nn as nn
+from torch import arange
 
-from torchvision import transforms
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def padding_stride(tensor, stride):
+    batch_size, channel, hight, width = tensor.shape
+    A = torch.zeros((batch_size, channel, hight, width * stride - (stride - 1))).to(device)
+    A[:, :, :, arange(width) * stride] = tensor
+    B = torch.zeros((batch_size, channel, hight * stride - (stride - 1), width * stride - (stride - 1))).to(device)
+    B[:, :, arange(hight) * stride, :] = A
+    return B
+
+def circular_padding(tensor, h, w):
+    batch_size, channel, hight, width = tensor.shape
+    out = torch.zeros((batch_size, channel, hight + 2 * h, width + 2 * w)).to(device)
+    out[:, :, h:h + hight, w:w + width] = tensor
+    return out
+
+def padding_inverse(tensor, stride):
+    p = arange(1, tensor.shape[2] + 1, stride) - 1
+    q = arange(1, tensor.shape[3] + 1, stride) - 1
+    row = tensor[:, :, p, :]
+    res = row[:, :, :, q]
+    return res
+
+def circular_inverse(tensor, h, w):
+    _,_, hight, width = tensor.shape
+    out = tensor[:, :, h:hight - h, w:width - w]
+    return out
+
+def output_padding(tensor, h, w):
+    batch_size, channel, hight, width = tensor.shape
+    out = torch.zeros((batch_size, channel, hight + h, width + w)).to(device)
+    out[:, :, 0:hight, 0:width] = tensor
+    return out
+
+def inverse_output(tensor, h, w):
+    batch_size, channel, hight, width = tensor.shape
+    out = tensor[:, :, 0:hight - h, 0:width - w]
+    return out
 
 def load_data(train_path, val_path):
-    train_dir = train_path + 'train_data.pkl'
-    val_dir = val_path + 'val_data.pkl'
+    train_path = train_path + 'train_data.pkl'
+    val_path = val_path + 'val_data.pkl'
 
-    tr_tensor1, tr_tensor2 = torch.load(train_dir)
-    val_tensor, clean_tensor = torch.load(val_dir)
+    train_input0, train_input1 = torch.load(train_path)
+    val_input, val_target = torch.load(val_path)
 
-    return tr_tensor1, tr_tensor2, val_tensor, clean_tensor
+    return train_input0, train_input1, val_input, val_target
 
 
 # [0, 1] Normalization
 def zero_one_norm(data_tensor):
-    return data_tensor.float() / 255
-
-
-# def augment_data(img_tensor):
-#     device = img_tensor.device
-#     _, _, H, W = img_tensor.shape
-#
-#     transform = transforms.Compose([
-#         transforms.RandomHorizontalFlip(),
-#         transforms.RandomVerticalFlip(),
-#         transforms.RandomRotation(90),
-#
-#     ])
-
-
-def psnr(denoised, ground_truth):
-    mse = torch.mean((denoised - ground_truth) ** 2)
-    return -10 * torch.log10(mse + 10 ** -8)
+    return data_tensor.float() / 255.0
 
 
 def compute_psnr(x, y, max_range=1.0):
@@ -56,3 +77,9 @@ class StatsTracer(object):
         self.sum += value * count
         self.nb_batch += count
         self.avg = self.sum / self.nb_batch
+
+class CPU_Unpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+        else: return super().find_class(module, name)

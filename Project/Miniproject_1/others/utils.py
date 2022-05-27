@@ -1,47 +1,27 @@
 import torch
-import torch.nn as nn
-
-from torchvision import transforms
-
-
-def load_data(train_path, val_path):
-    train_dir = train_path + 'train_data.pkl'
-    val_dir = val_path + 'val_data.pkl'
-
-    tr_tensor1, tr_tensor2 = torch.load(train_dir)
-    val_tensor, clean_tensor = torch.load(val_dir)
-
-    return tr_tensor1, tr_tensor2, val_tensor, clean_tensor
-
-
-# [0, 1] Normalization
-def zero_one_norm(data_tensor):
-    return data_tensor.float() / 255
-
-
-# def augment_data(img_tensor):
-#     device = img_tensor.device
-#     _, _, H, W = img_tensor.shape
-#
-#     transform = transforms.Compose([
-#         transforms.RandomHorizontalFlip(),
-#         transforms.RandomVerticalFlip(),
-#         transforms.RandomRotation(90),
-#
-#     ])
-
 
 def psnr(denoised, ground_truth):
+    # Peak Signal to Noise Ratio : denoised and ground_truth have range [0, 1]
     mse = torch.mean((denoised - ground_truth) ** 2)
-    return -10 * torch.log10(mse + 10 ** -8)
+    return -10 * torch.log10(mse + 10**-8 )
 
+def zero_one_norm(data_tensor):
+    return data_tensor.float() / 255
 
 def compute_psnr(x, y, max_range=1.0):
     assert x.shape == y.shape and x.ndim == 4
     return 20 * torch.log10(torch.tensor(max_range)) - 10 * torch.log10(((x - y) ** 2).mean((1, 2, 3))).mean()
 
 
-# Tracks stats for average mini-batch loss
+def add_Gaussian_noise(inputs, mean=0, std=1):
+
+    inputs = inputs.double()
+    std = torch.rand(1)*std
+    noise = torch.randn_like(inputs)*std+torch.tensor(mean)
+    output = torch.clamp(inputs + noise, min=0, max=255)
+    return output.type(torch.uint8)
+
+
 class StatsTracer(object):
     def __init__(self):
         self.reset()
