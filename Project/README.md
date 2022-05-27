@@ -1,4 +1,4 @@
-# Deep learning miniprojects
+# EE-559 Deep Learning Miniprojects (22 Spring)
 
 This repository contains our implementation of the two mini-projects of François Fleuret's _Deep Learning_ course at EPFL (EE-559).
 
