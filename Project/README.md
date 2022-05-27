@@ -7,11 +7,11 @@ Authors:
 * [*Xianjie Dai*](https://github.com/xianjiedai)
 
 ## Miniproject 1: U-Net based Noise2Noise Auto-encoder Image Denoiser
-The goal of this project is to implement a neural network to predict the laterality of an upcoming finger movement (left or right hand) from the EEG recording 130 ms before key-press. This is a standard two-class classification problem.
+The goal of the mini-projects is to implement a Noise2Noise image denoiser. Generally speaking, a Noise2Noise model is an image denoising network trained without a clean reference image. 
 
 
 ## Miniproject 2: Implementation of a basic deep learning framework from scratch 
-The goal of this project is to design a mini auto-encoder using only pytorch’s tensor operations and the standard math library, hence in particular without using autograd or the neural-network modules.
+The goal of this project is to design a mini N2N-like image denoiser using only pytorch’s tensor operations and the standard math library, hence in particular without using autograd or the neural-network modules.
 
 The following modules were implemented:
 - ReLU activation function,
